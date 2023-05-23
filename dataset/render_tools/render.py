@@ -18,8 +18,8 @@ def render_one_image(model_id, camera_idx, render_idx, height, width, use_raytra
         raise ValueError(f'Cannot find the category of model {model_id}')
     
     # 2. read the urdf file,  get the kinematic chain, and collect all the joints information
-    anno_data_path = pjoin(DATASET_PATH, 'annotation', str(model_id))
-    joints_dict = read_joints_from_urdf_file(anno_data_path, 'mobility_relabel_gapartnet.urdf')
+    data_path = pjoin(DATASET_PATH, str(model_id))
+    joints_dict = read_joints_from_urdf_file(data_path, 'mobility_annotation_gapartnet.urdf')
     
     # 3. generate the joint qpos randomly in the limit range
     joint_qpos = {}
@@ -44,8 +44,8 @@ def render_one_image(model_id, camera_idx, render_idx, height, width, use_raytra
     )
     
     # 5. pass the joint qpos and the augmentation parameters to set up render environment and robot
-    scene, camera, engine, robot = set_all_scene(data_path=anno_data_path, 
-                                        urdf_file='mobility_relabel_gapartnet.urdf',
+    scene, camera, engine, robot = set_all_scene(data_path=data_path, 
+                                        urdf_file='mobility_annotation_gapartnet.urdf',
                                         cam_pos=camera_pos,
                                         width=width, 
                                         height=height,
@@ -53,7 +53,7 @@ def render_one_image(model_id, camera_idx, render_idx, height, width, use_raytra
                                         joint_qpos_dict=joint_qpos)
     
     # 6. use qpos to calculate the gapart poses
-    link_pose_dict = query_part_pose_from_joint_qpos(data_path=anno_data_path, anno_file='link_anno_gapartnet.json', joint_qpos=joint_qpos, joints_dict=joints_dict, target_parts=TARGET_GAPARTS, robot=robot)
+    link_pose_dict = query_part_pose_from_joint_qpos(data_path=data_path, anno_file='link_annotation_gapartnet.json', joint_qpos=joint_qpos, joints_dict=joints_dict, target_parts=TARGET_GAPARTS, robot=robot)
     
     # 7. render the rgb, depth, mask, valid(visible) gapart
     rgb_image = render_rgb_image(camera=camera)
@@ -69,11 +69,10 @@ def render_one_image(model_id, camera_idx, render_idx, height, width, use_raytra
     
     # 10. (optional) use texture to render rgb to replace the previous rgb (texture issue during cutting the mesh)
     if replace_texture:
-        texture_data_path = pjoin(DATASET_PATH, 'texture', str(model_id))
-        texture_joints_dict = read_joints_from_urdf_file(texture_data_path, 'mobility_relabel.urdf')
+        texture_joints_dict = read_joints_from_urdf_file(data_path, 'mobility_texture_gapartnet.urdf')
         texture_joint_qpos = merge_joint_qpos(joint_qpos, joints_dict, texture_joints_dict)
-        scene, camera, engine, robot = set_all_scene(data_path=texture_data_path, 
-                                        urdf_file='mobility_relabel.urdf',
+        scene, camera, engine, robot = set_all_scene(data_path=data_path, 
+                                        urdf_file='mobility_texture_gapartnet.urdf',
                                         cam_pos=camera_pos,
                                         width=width, 
                                         height=height,
@@ -87,6 +86,8 @@ def render_one_image(model_id, camera_idx, render_idx, height, width, use_raytra
     
     # 12. save the rendered results
     save_name = f"{category}_{model_id}_{camera_idx}_{render_idx}"
+    if not os.path.exists(SAVE_PATH):
+        os.mkdir(SAVE_PATH)
     
     save_rgb_image(rgb_image, SAVE_PATH, save_name)
     

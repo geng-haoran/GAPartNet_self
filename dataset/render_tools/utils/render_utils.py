@@ -169,8 +169,8 @@ def render_sem_ins_seg_map(scene: sapien.Scene, camera, link_pose_dict, depth_ma
     seg_labels_by_visual_id = seg_labels[..., 0].astype(np.uint16)  # H x W, save each pixel's visual id
     height, width = seg_labels_by_visual_id.shape
 
-    sem_seg_map = np.ones((height, width), dtype=np.int32) * (-2) # -2 for background, -1 for others, 0~N-1 for N categories
-    ins_seg_map = np.ones((height, width), dtype=np.int32) * (-2) # -2 for background, -1 for others, 0~M-1 for M instances
+    sem_seg_map = np.ones((height, width), dtype=np.int32) * (-1) # -2 for background, -1 for others, 0~N-1 for N categories
+    ins_seg_map = np.ones((height, width), dtype=np.int32) * (-1) # -2 for background, -1 for others, 0~M-1 for M instances
 
     valid_linkName_to_instId_mapping = {}
     part_ins_cnt = 0
@@ -188,8 +188,8 @@ def render_sem_ins_seg_map(scene: sapien.Scene, camera, link_pose_dict, depth_ma
         part_ins_cnt += 1
     
     empty_mask = abs(depth_map) < eps
-    sem_seg_map[empty_mask] = -1
-    ins_seg_map[empty_mask] = -1
+    sem_seg_map[empty_mask] = -2
+    ins_seg_map[empty_mask] = -2
 
     return sem_seg_map, ins_seg_map, valid_linkName_to_instId_mapping
 
