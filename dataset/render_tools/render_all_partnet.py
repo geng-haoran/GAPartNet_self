@@ -35,9 +35,9 @@ if __name__ == "__main__":
 
         for pos_idx in range(len(CAMERA_POSITION_RANGE[category])):
             for render_idx in range(num_render):
-                print(f'Rendering: {category} : {model_id} : {pos_idx} : {render_idx}\n')
+                print(f'Rendering: {category} : {model_id} : {pos_idx} : {start_idx + render_idx}\n')
                 
-                render_string = f'python -u render.py --model_id {model_id} --camera_idx {pos_idx} --render_idx {render_idx} --height {HEIGHT} --width {WIDTH}'
+                render_string = f'python -u render.py --model_id {model_id} --camera_idx {pos_idx} --render_idx {start_idx + render_idx} --height {HEIGHT} --width {WIDTH}'
                 if ray_tracing:
                     render_string += ' --ray_tracing True'
                 if replace_texture:

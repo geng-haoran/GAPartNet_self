@@ -178,7 +178,7 @@ if __name__ == "__main__":
     parser.add_argument('--data_path', type=str, default='./rendered_data', help='Specify the path to the rendered data')
     parser.add_argument('--save_path', type=str, default='./sampled_data', help='Specify the path to save the sampled data')
     parser.add_argument('--num_points', type=int, default=20000, help='Specify the number of points to sample')
-    parser.add_argument('--visualize', action='store_true', help='Visualize the sampled point cloud')
+    parser.add_argument('--visualize', type=bool, default=False, help='Whether to visualize the sampled point cloud')
     
     args = parser.parse_args()
     
