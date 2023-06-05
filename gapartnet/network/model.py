@@ -148,18 +148,18 @@ class GAPartNet(lp.LightningModule):
             f"{prefix}/total_loss", 
             loss, 
             batch_size=batch_size,
-            on_epoch=True, prog_bar=True, logger=True)
+            on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
         self.log(
             f"{prefix}/loss_sem_seg",
             loss_sem_seg,
             batch_size=batch_size,
-            on_epoch=True, prog_bar=True, logger=True
+            on_epoch=True, prog_bar=True, logger=True, sync_dist=True
         )
         self.log(
             f"{prefix}/all_accu",
             all_accu * 100,
             batch_size=batch_size,
-            on_epoch=True, prog_bar=True, logger=True
+            on_epoch=True, prog_bar=True, logger=True, sync_dist=True
         )
 
         return pc_ids, sem_seg, all_accu, loss
@@ -184,16 +184,23 @@ class GAPartNet(lp.LightningModule):
     def on_validation_epoch_end(self):
         
         splits = ["val", "intra", "inter"]
+        sem_accu = {}
         for i_, validation_step_outputs in enumerate(self.validation_step_outputs):
             split = splits[i_]
             batch_size = sum(x[1].batch_size for x in validation_step_outputs)
             all_accu = sum(x[2] for x in validation_step_outputs) / len(validation_step_outputs)
             # torch.save(validation_step_outputs, "wandb/predictions_gap.pth")
             del validation_step_outputs
+            sem_accu[split] = all_accu
             self.log(f"{split}/all_accu", 
                     all_accu, 
                     batch_size=batch_size,
-                    on_epoch=True, prog_bar=True, logger=True)
+                    on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+        
+        self.log(f"moniter_metric/sem_accu", 
+                sem_accu["intra"] + sem_accu["inter"], 
+                batch_size=batch_size,
+                on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
 
         self.validation_step_outputs.clear() 
 

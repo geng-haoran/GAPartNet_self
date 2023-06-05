@@ -1,9 +1,9 @@
 # lightning.pytorch==2.0.2
 seed_everything: 23333
 trainer:
-  accelerator: gpu
-  strategy: auto
-  devices: 1
+  accelerator: "auto"
+  strategy: "auto"
+  devices: [6]
   num_nodes: 1
   precision: 32-true
   logger:
@@ -53,7 +53,7 @@ trainer:
     init_args:
       dirpath: null
       filename: epoch_{epoch:03d}_miou_{intra/all_accu:.2f}_{inter/all_accu:.2f}
-      monitor: {intra/all_accu+inter/all_accu}
+      monitor: moniter_metric/sem_accu
       verbose: false
       save_last: null
       save_top_k: 5
