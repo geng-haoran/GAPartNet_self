@@ -17,8 +17,12 @@ model:
       block_repeat: 2
     learning_rate: 0.001
     ignore_sem_label: -100
-    use_sem_focal_loss: false
+    use_sem_focal_loss: true
     use_sem_dice_loss: true
+    visualize_cfg:
+      visualize: True
+      visualize_dir: visualization
+      visualize_num_split: 10
 data:
   class_path: dataset.gapartnet.GAPartNetInst
   init_args:
@@ -46,7 +50,7 @@ trainer:
   max_epochs: 700
   accelerator: gpu
   strategy: auto
-  devices: 1
+  devices: auto
   num_nodes: 1
   # resume_from_checkpoint: /data2/haoran/PLAffordance/wandb/perception/1osg9z17/checkpoints/epoch_118_miou_0.00.ckpt
 
@@ -72,7 +76,7 @@ trainer:
         auto_insert_metric_name: False
         save_top_k: 5
         mode: max
-        monitor: "monitor_metrics/mean_accu"
+        monitor: "monitor_metrics/mean_imou"
         every_n_epochs: 1
 
   default_root_dir: wandb

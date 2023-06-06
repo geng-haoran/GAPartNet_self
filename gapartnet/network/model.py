@@ -23,6 +23,7 @@ class GAPartNet(lp.LightningModule):
         ignore_sem_label: int = -100,
         use_sem_focal_loss: bool = True,
         use_sem_dice_loss: bool = True,
+        visualize_cfg: Optional[Dict] = None,
         debug: bool = True,
         ckpt: str = None,
     ):
@@ -38,6 +39,7 @@ class GAPartNet(lp.LightningModule):
         self.ignore_sem_label = ignore_sem_label
         self.use_sem_focal_loss = use_sem_focal_loss
         self.use_sem_dice_loss = use_sem_dice_loss
+        self.visualize_cfg = visualize_cfg
         
         ## network
         norm_fn = functools.partial(nn.BatchNorm1d, eps=1e-4, momentum=0.1)
@@ -91,7 +93,6 @@ class GAPartNet(lp.LightningModule):
         sem_logits = self.sem_seg_head(pc_feature)
 
         return sem_logits
-
 
     def loss_sem_seg(
         self,
@@ -152,8 +153,6 @@ class GAPartNet(lp.LightningModule):
         loss_offset_dir = dir_diff[valid_instance_mask].mean()
 
         return loss_offset_dist, loss_offset_dir
-
-        
 
     def _training_or_validation_step(
         self,
@@ -332,60 +331,68 @@ class GAPartNet(lp.LightningModule):
 
     def test_step(self, point_clouds: List[PointCloud], batch_idx: int, dataloader_idx: int = 0):
         split = ["val", "intra", "inter"]
-        pc_ids, sem_seg, proposals, _ = self._training_or_validation_step(
+        pc_ids, sem_seg, _ = self._training_or_validation_step(
             point_clouds, batch_idx, split[dataloader_idx]
         )
+        if dataloader_idx > len(self.validation_step_outputs) - 1:
+            self.validation_step_outputs.append([])
+        self.validation_step_outputs[dataloader_idx].append((pc_ids, sem_seg))
+        return pc_ids, sem_seg
 
-        if proposals is not None:
-            proposals = filter_invalid_proposals(
-                proposals,
-                score_threshold=self.val_score_threshold,
-                min_num_points_per_proposal=self.val_min_num_points_per_proposal
-            )
-            proposals = apply_nms(proposals, self.val_nms_iou_threshold)
-
-        if proposals != None:
-            proposals.pt_sem_classes = proposals.sem_preds[proposals.proposal_offsets[:-1].long()]
-            proposals.valid_mask = None
-            proposals.pt_xyz = None
-            proposals.sem_preds = None
-            proposals.npcs_preds = None
-            proposals.sem_labels = None
-            proposals.npcs_valid_mask = None
-            proposals.gt_npcs = None
-
-        return pc_ids, sem_seg, proposals
-
-    def test_epoch_end(self, validation_step_outputs_list):
-        splits = ["val", "intra", "inter"]
-        for i_, validation_step_outputs in enumerate(validation_step_outputs_list):
-            split = splits[i_]
+    def on_test_epoch_end(self):
         
+        splits = ["val", "intra", "inter"]
+        all_accus = []
+        pixel_accus = []
+        mious = []
+        for i_, validation_step_outputs in enumerate(self.validation_step_outputs):
+            split = splits[i_]
             batch_size = sum(x[1].batch_size for x in validation_step_outputs)
-
-            proposals = [x[2] for x in validation_step_outputs] # if x[2] != None 
-            
+            all_accu = sum(x[1].all_accu for x in validation_step_outputs) / len(validation_step_outputs)
+            pixel_accu = sum(x[1].pixel_accu for x in validation_step_outputs) / len(validation_step_outputs)
+            # torch.save(validation_step_outputs, "wandb/predictions_gap.pth")
+            sem_preds = torch.cat(
+                [x[1].sem_preds for x in validation_step_outputs], dim=0
+            )
+            sem_labels = torch.cat(
+                [x[1].sem_labels for x in validation_step_outputs], dim=0
+            )
+            miou = mean_iou(sem_preds, sem_labels, num_classes=self.num_part_classes)
             del validation_step_outputs
-
-            if proposals[0] is not None:
-
-                aps = compute_ap(proposals, self.num_classes, self.val_ap_iou_threshold)
-
-                for class_idx in range(1, self.num_classes):
-                    partname = PART_ID2NAME[class_idx]
-                    self.log(
-                        f"{split}/AP@50_{partname}",
-                        aps[class_idx - 1] * 100,
-                        batch_size=batch_size,
-                        on_epoch=True, prog_bar=True, logger=True
-                        
-                    )
-                self.log(
-                    f"{split}/AP@50", 
-                    np.mean(aps) * 100, 
+            all_accus.append(all_accu)
+            mious.append(miou)
+            pixel_accus.append(pixel_accu)
+            self.log(f"{split}/all_accu", 
+                    all_accu * 100.0, 
                     batch_size=batch_size,
-                    on_epoch=True, prog_bar=True, logger=True)
-    
+                    on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+            self.log(f"{split}/pixel_accu", 
+                    pixel_accu * 100.0, 
+                    batch_size=batch_size,
+                    on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+            self.log(f"{split}/miou",
+                     miou * 100.0,
+                     batch_size=batch_size,
+                    on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+            
+        # need to make sure the order of the splits is correct:
+        # the second validation set is intra set and the third set is inter set
+        self.log("monitor_metrics/mean_all_accu", 
+                (all_accus[1]+all_accus[2])/2 * 100.0, 
+                batch_size=batch_size,
+                on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+        self.log("monitor_metrics/mean_pixel_accu", 
+                (pixel_accus[1]+pixel_accus[2])/2 * 100.0, 
+                batch_size=batch_size,
+                on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+        self.log("monitor_metrics/mean_imou", 
+                (mious[1]+mious[2])/2 * 100.0, 
+                batch_size=batch_size,
+                on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+
+
+        self.validation_step_outputs.clear() 
+  
     def configure_optimizers(self):
         return torch.optim.Adam(
             filter(lambda p: p.requires_grad, self.parameters()),

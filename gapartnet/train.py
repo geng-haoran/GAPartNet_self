@@ -12,6 +12,8 @@ def log_name(config):
     else:
         raise NotImplementedError(f"backbone type {config['model']['init_args']['backbone_type']} not implemented")
     
+    model_str += "_"
+    
     if config["model"]["init_args"]["use_sem_focal_loss"]:
         model_str += "T"
     else:
@@ -23,7 +25,7 @@ def log_name(config):
     
     # data
     data_str = ""
-    data_str += "BS" + str(config["data"]["init_args"]["train_batch_size"])
+    data_str += "BS" + str(config["data"]["init_args"]["train_batch_size"]) + "_"
     data_str += "Aug" + \
         ""+str(config["data"]["init_args"]["pos_jitter"]) +\
         "-"+str(config["data"]["init_args"]["color_jitter"]) +\
@@ -38,7 +40,7 @@ class CustomCLI(LightningCLI):
             wandb.finish()
             self.config["fit"]["trainer"]["logger"]["init_args"]["mode"] = "online"
         model_str, data_str = log_name(self.config["fit"])
-        self.config["fit"]["trainer"]["logger"]["init_args"]["name"] += model_str + "_" + data_str
+        self.config["fit"]["trainer"]["logger"]["init_args"]["name"] += "_" + model_str + "_" + data_str
         self.trainer.logger = WandbLogger(**self.config["fit"]["trainer"]["logger"]["init_args"])
 
 
