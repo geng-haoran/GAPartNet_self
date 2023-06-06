@@ -1,105 +1,7 @@
-# lightning.pytorch==2.0.2
-seed_everything: 23333
-trainer:
-  accelerator: gpu
-  strategy: auto
-  devices: 1
-  num_nodes: 1
-  precision: 32-true
-  logger:
-    class_path: lightning.pytorch.loggers.WandbLogger
-    init_args:
-      name: NewData_Noadv_0.0_0.0_0.5_[16, 32, 48, 64, 80, 96, 112]_32_FF_5-10-15_{data/train_few_shot}
-      save_dir: wandb
-      version: null
-      offline: false
-      dir: null
-      id: null
-      anonymous: null
-      project: perception
-      log_model: false
-      experiment: null
-      prefix: ''
-      checkpoint_name: null
-      job_type: null
-      config: null
-      entity: haoran-geng
-      reinit: null
-      tags:
-      - GAPartNet
-      - score
-      - npcs
-      group: 1024_new
-      notes: GAPartNet
-      magic: null
-      config_exclude_keys: null
-      config_include_keys: null
-      mode: null
-      allow_val_change: null
-      resume: null
-      force: null
-      tensorboard: null
-      sync_tensorboard: null
-      monitor_gym: null
-      save_code: true
-      settings: null
-  callbacks:
-  - class_path: lightning.pytorch.callbacks.RichProgressBar
-    init_args:
-      refresh_rate: 1
-      leave: true
-      console_kwargs: null
-  - class_path: lightning.pytorch.callbacks.ModelCheckpoint
-    init_args:
-      dirpath: null
-      filename: epoch_{epoch:03d}_miou_{intra/all_accu:.2f}_{inter/all_accu:.2f}
-      monitor: {intra/all_accu+inter/all_accu}
-      verbose: false
-      save_last: null
-      save_top_k: 5
-      save_weights_only: false
-      mode: max
-      auto_insert_metric_name: false
-      every_n_train_steps: null
-      train_time_interval: null
-      every_n_epochs: 1
-      save_on_train_epoch_end: null
-  fast_dev_run: false
-  max_epochs: 700
-  min_epochs: null
-  max_steps: -1
-  min_steps: null
-  max_time: null
-  limit_train_batches: null
-  limit_val_batches: null
-  limit_test_batches: null
-  limit_predict_batches: null
-  overfit_batches: 0.0
-  val_check_interval: null
-  check_val_every_n_epoch: 1
-  num_sanity_val_steps: null
-  log_every_n_steps: null
-  enable_checkpointing: null
-  enable_progress_bar: null
-  enable_model_summary: null
-  accumulate_grad_batches: 1
-  gradient_clip_val: null
-  gradient_clip_algorithm: null
-  deterministic: null
-  benchmark: null
-  inference_mode: true
-  use_distributed_sampler: true
-  profiler: null
-  detect_anomaly: false
-  barebones: false
-  plugins: null
-  sync_batchnorm: false
-  reload_dataloaders_every_n_epochs: 0
-  default_root_dir: wandb
-ckpt_path: null
 model:
   class_path: network.model.GAPartNet
   init_args:
+    debug: False
     in_channels: 6
     num_part_classes: 10
     backbone_type: SparseUNet
@@ -116,7 +18,7 @@ model:
     learning_rate: 0.001
     ignore_sem_label: -100
     use_sem_focal_loss: false
-    use_sem_dice_loss: false
+    use_sem_dice_loss: true
 data:
   class_path: dataset.gapartnet.GAPartNetInst
   init_args:
@@ -139,3 +41,40 @@ data:
     intra_few_shot: false
     inter_few_shot: false
     few_shot_num: 640
+
+trainer:
+  max_epochs: 700
+  accelerator: gpu
+  strategy: auto
+  devices: 1
+  num_nodes: 1
+  # resume_from_checkpoint: /data2/haoran/PLAffordance/wandb/perception/1osg9z17/checkpoints/epoch_118_miou_0.00.ckpt
+
+  logger:
+    class_path: WandbLogger
+    init_args:
+      save_dir: wandb
+      project: perception
+      entity: haoran-geng
+      group: 1024_new
+      name: test
+      notes: "GAPartNet"
+      tags: ["GAPartNet", "score", "npcs"]
+      save_code: True
+      mode: dryrun
+  callbacks:
+    - class_path: RichProgressBar
+      init_args:
+        leave: True
+    - class_path: ModelCheckpoint
+      init_args:
+        filename: "epoch_{epoch:03d}_accu_{monitor_metrics/mean_accu:.2f}"
+        auto_insert_metric_name: False
+        save_top_k: 5
+        mode: max
+        monitor: "monitor_metrics/mean_accu"
+        every_n_epochs: 1
+
+  default_root_dir: wandb
+
+seed_everything: 23333

@@ -23,6 +23,13 @@ class PointCloudBatch:
     sem_labels: torch.Tensor = None
     obj_cls_labels = None
     
+    # instance
+    instance_labels: Optional[torch.Tensor] = None
+    num_instances: Optional[List[int]] = None
+    instance_regions: Optional[torch.Tensor] = None
+    num_points_per_instance: Optional[torch.Tensor] = None
+    instance_sem_labels: Optional[torch.Tensor] = None
+    
 @dataclass
 class PointCloud:
     pc_id: str
@@ -36,9 +43,16 @@ class PointCloud:
 
     gt_npcs: Optional[Union[torch.Tensor, np.ndarray]] = None
 
-    num_instances: Optional[int] = None
+    # instance number
+    num_instances: Optional[int] = None 
+    
+    # for points in an instance: 0-3: mean_xyz; 3-6: max_xyz; 6-9: min_xyz
     instance_regions: Optional[Union[torch.Tensor, np.ndarray]] = None
+    
+    # instance points number
     num_points_per_instance: Optional[Union[torch.Tensor, np.ndarray]] = None
+    
+    # instance semantic label
     instance_sem_labels: Optional[torch.Tensor] = None
 
     voxel_features: Optional[torch.Tensor] = None
@@ -65,7 +79,7 @@ class PointCloud:
         })
 
     @staticmethod
-    def collate(point_clouds: List["PointCloud"]):
+    def collate(point_clouds: List["PointCloud"]) -> PointCloudBatch:
         batch_size = len(point_clouds) 
         device = point_clouds[0].points.device
 
@@ -84,39 +98,40 @@ class PointCloud:
         else:
             sem_labels = None
 
-        # if point_clouds[0].instance_labels is not None:
-        #     instance_labels = torch.cat([pc.instance_labels for pc in point_clouds], dim=0)
-        # else:
-        #     instance_labels = None
+        if point_clouds[0].instance_labels is not None:
+            instance_labels = torch.cat([pc.instance_labels for pc in point_clouds], dim=0)
+        else:
+            instance_labels = None
 
         # if point_clouds[0].gt_npcs is not None:
         #     gt_npcs = torch.cat([pc.gt_npcs for pc in point_clouds], dim=0)
         # else:
         #     gt_npcs = None
 
-        # if point_clouds[0].num_instances is not None:
-        #     num_instances = [pc.num_instances for pc in point_clouds]
-        #     max_num_instances = max(num_instances)
-        #     num_points_per_instance = torch.zeros(
-        #         batch_size, max_num_instances, dtype=torch.int32, device=device
-        #     )
-        #     instance_sem_labels = torch.full(
-        #         (batch_size, max_num_instances), -1, dtype=torch.int32, device=device
-        #     )
-        #     for i, pc in enumerate(point_clouds):
-        #         num_points_per_instance[i, :pc.num_instances] = pc.num_points_per_instance
-        #         instance_sem_labels[i, :pc.num_instances] = pc.instance_sem_labels
-        # else:
-        #     num_instances = None
-        #     num_points_per_instance = None
-        #     instance_sem_labels = None
+        if point_clouds[0].num_instances is not None:
+            num_instances = [pc.num_instances for pc in point_clouds]
+            max_num_instances = max(num_instances)
+            num_points_per_instance = torch.zeros(
+                batch_size, max_num_instances, dtype=torch.int32, device=device
+            )
+            instance_sem_labels = torch.full(
+                (batch_size, max_num_instances), -1, dtype=torch.int32, device=device
+            )
+            for i, pc in enumerate(point_clouds):
+                num_points_per_instance[i, :pc.num_instances] = pc.num_points_per_instance
+                instance_sem_labels[i, :pc.num_instances] = pc.instance_sem_labels
+        else:
+            num_instances = None
+            num_points_per_instance = None
+            instance_sem_labels = None
+            import pdb; pdb.set_trace()
 
-        # if point_clouds[0].instance_regions is not None:
-        #     instance_regions = torch.cat([
-        #         pc.instance_regions for pc in point_clouds
-        #     ], dim=0)
-        # else:
-        #     instance_regions = None
+        if point_clouds[0].instance_regions is not None:
+            instance_regions = torch.cat([
+                pc.instance_regions for pc in point_clouds
+            ], dim=0)
+        else:
+            instance_regions = None
 
         voxel_batch_indices = torch.cat([
             torch.full((
@@ -160,6 +175,12 @@ class PointCloud:
             voxel_tensor=voxel_tensor,
             pc_voxel_id=pc_voxel_id,
             sem_labels=sem_labels,
+            # instance
+            num_instances=num_instances,
+            instance_regions=instance_regions,
+            num_points_per_instance=num_points_per_instance, 
+            instance_sem_labels=instance_sem_labels, 
+            instance_labels = instance_labels
         )
     
 

@@ -64,67 +64,18 @@ class GAPartNetDataset(Dataset):
         if not bool((file.instance_labels != -100).any()):
             import ipdb; ipdb.set_trace()
         file = downsample(file, max_points=self.max_points)
-        # file = compact_instance_labels(file)
+        file = compact_instance_labels(file)
         if self.augmentation:
             file = apply_augmentations(file, 
                 pos_jitter=self.pos_jitter,
                 color_jitter=self.color_jitter,
                 flip_prob=self.flip_prob,
                 rotate_prob=self.rotate_prob,)
-        # file = generate_inst_info(file)
+        file = generate_inst_info(file)
         file = file.to_tensor()
         file = apply_voxelization(file, voxel_size=self.voxel_size)
         return file
     
-# class GAPartNetDataset(Dataset):
-#     def __init__(
-#         self, 
-#         root_dir: Union[str, Path] = "",
-#         shuffle: bool = False,
-#         augmentation: bool = False,
-#         voxel_size: Tuple[float, float, float] = (1 / 100, 1 / 100, 1 / 100),
-#         few_shot = False,
-#         few_shot_num = 512,
-#         pos_jitter: float = 0.,
-#         color_jitter: float = 0.,
-#         flip_prob: float = 0.,
-#         rotate_prob: float = 0.,
-#         max_points: int = 20000,
-#         no_label = False,
-#     ):
-#         file_paths=glob(str(root_dir) + "/*.pth")
-#         if shuffle:
-#             random.shuffle(file_paths)
-#         if few_shot:
-#             file_paths = file_paths[:few_shot_num]
-#         self.pc_paths = file_paths
-#         self.no_label = no_label
-#         self.augmentation = augmentation
-#         self.pos_jitter = pos_jitter
-#         self.color_jitter = color_jitter
-#         self.flip_prob = flip_prob
-#         self.rotate_prob = rotate_prob
-#         self.voxel_size = voxel_size
-#         self.max_points = max_points
-        
-#     def __len__(self):
-#         return len(self.pc_paths)
-    
-#     def __getitem__(self, idx):
-#         path = self.pc_paths[idx]
-#         file = load_data(path, no_label = self.no_label)
-#         file = downsample(file, max_points=self.max_points)
-#         # file = compact_instance_labels(file)
-#         if self.augmentation:
-#             file = apply_augmentations(file, 
-#                 pos_jitter=self.pos_jitter,
-#                 color_jitter=self.color_jitter,
-#                 flip_prob=self.flip_prob,
-#                 rotate_prob=self.rotate_prob,)
-#         # file = generate_inst_info(file)
-#         file = file.to_tensor()
-#         file = apply_voxelization(file, voxel_size=self.voxel_size)
-#         return file
     
 def apply_augmentations(
     pc: PointCloud,
@@ -195,6 +146,8 @@ def generate_inst_info(pc: PointCloud) -> PointCloud:
     instance_regions = np.zeros((num_points, 9), dtype=np.float32)
     num_points_per_instance = []
     instance_sem_labels = []
+    
+    assert num_instances > 0
 
     for i in range(num_instances):
         indices = np.where(pc.instance_labels == i)[0]

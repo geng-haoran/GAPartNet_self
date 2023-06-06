@@ -10,4 +10,5 @@ class Segmentation:
 
     sem_preds: torch.Tensor
     sem_labels: Optional[torch.Tensor] = None
-
+    all_accu: Optional[torch.Tensor] = None
+    pixel_accu: Optional[torch.Tensor] = None
