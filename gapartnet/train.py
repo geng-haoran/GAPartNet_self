@@ -55,7 +55,7 @@ class CustomCLI(LightningCLI):
                 mode = "online",
             )
         else:
-            print("Debugging, not logging any data")
+            print("Debugging, not using wandb logger")
 
 def main():
     _ = CustomCLI(

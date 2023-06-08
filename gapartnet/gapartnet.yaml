@@ -47,9 +47,9 @@ data:
     flip_prob: 0.3
     rotate_prob: 0.3
     train_few_shot: false
-    val_few_shot: true
-    intra_few_shot: true
-    inter_few_shot: true
+    val_few_shot: false
+    intra_few_shot: false
+    inter_few_shot: false
     few_shot_num: 640
 
 trainer:
@@ -78,11 +78,11 @@ trainer:
         leave: True
     - class_path: ModelCheckpoint
       init_args:
-        filename: "epoch_{epoch:03d}_mious_{monitor_metrics/mean_imou:.2f}"
+        filename: "epoch_{epoch:03d}_mAP_{monitor_metrics/mean_mAP:.2f}"
         auto_insert_metric_name: False
         save_top_k: 5
         mode: max
-        monitor: "monitor_metrics/mean_imou"
+        monitor: "monitor_metrics/mean_mAP"
         every_n_epochs: 1
 
   default_root_dir: wandb

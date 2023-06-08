@@ -500,13 +500,13 @@ class GAPartNet(lp.LightningModule):
             f"{prefix}/all_accu",
             all_accu * 100,
             batch_size=batch_size,
-            on_epoch=True, prog_bar=True, logger=True, sync_dist=True
+            on_epoch=True, prog_bar=False, logger=True, sync_dist=True
         )
         self.log(
             f"{prefix}/pixel_accu",
             pixel_accu * 100,
             batch_size=batch_size,
-            on_epoch=True, prog_bar=True, logger=True, sync_dist=True
+            on_epoch=True, prog_bar=False, logger=True, sync_dist=True
         )
 
         return pc_ids, sem_seg, proposals, loss
@@ -523,6 +523,13 @@ class GAPartNet(lp.LightningModule):
             point_clouds, batch_idx, split[dataloader_idx]
         )
         
+        if proposals is not None:
+            proposals = filter_invalid_proposals(
+                proposals,
+                score_threshold=self.val_score_threshold,
+                min_num_points_per_proposal=self.val_min_num_points_per_proposal
+            )
+            proposals = apply_nms(proposals, self.val_nms_iou_threshold)
         
         
         if dataloader_idx > len(self.validation_step_outputs) - 1:
@@ -530,14 +537,8 @@ class GAPartNet(lp.LightningModule):
         
         proposals.pt_sem_classes = proposals.sem_preds[proposals.proposal_offsets[:-1].long()]
         
-        # # NMS and filter
-        # if proposals is not None:
-        #     proposals = filter_invalid_proposals(
-        #         proposals,
-        #         score_threshold=self.val_score_threshold,
-        #         min_num_points_per_proposal=self.val_min_num_points_per_proposal
-        #     )
-        #     proposals = apply_nms(proposals, self.val_nms_iou_threshold)
+
+        
         
         proposals_ = Instances(
             score_preds=proposals.score_preds, pt_sem_classes=proposals.pt_sem_classes, \
@@ -551,14 +552,18 @@ class GAPartNet(lp.LightningModule):
 
     def on_validation_epoch_end(self):
         
-        splits = ["val", "intra", "inter"]
+        
+        splits = ["val", "test_intra", "test_inter"]
         all_accus = []
         pixel_accus = []
         mious = []
-        mean_aps = []
+        mean_ap50 = []
+        mAPs = []
         for i_, validation_step_outputs in enumerate(self.validation_step_outputs):
             split = splits[i_]
-            batch_size = sum(x[1].batch_size for x in validation_step_outputs)
+            pc_ids = [i for x in validation_step_outputs for i in x[0]]
+            batch_size = validation_step_outputs[0][1].batch_size
+            data_size = sum(x[1].batch_size for x in validation_step_outputs)
             all_accu = sum(x[1].all_accu for x in validation_step_outputs) / len(validation_step_outputs)
             pixel_accu = sum(x[1].pixel_accu for x in validation_step_outputs) / len(validation_step_outputs)
             
@@ -575,7 +580,6 @@ class GAPartNet(lp.LightningModule):
             # instance segmentation
             proposals = [x[2] for x in validation_step_outputs if x[2]!= None]
             
-            
             del validation_step_outputs
             
             # semantic segmentation
@@ -584,59 +588,72 @@ class GAPartNet(lp.LightningModule):
             pixel_accus.append(pixel_accu)
             
             # instance segmentation
-            aps = compute_ap(proposals, self.num_part_classes, self.val_ap_iou_threshold)
-            # import pdb
-            # pdb.set_trace()
+            thes = [0.5 + 0.05 * i for i in range(10)]
+            aps = []
+            for the in thes:
+                ap = compute_ap(proposals, self.num_part_classes, the)
+                aps.append(ap)
+                if the == 0.5:
+                    ap50 = ap
+            mAP = np.array(aps).mean()
+            mAPs.append(mAP)
+
             for class_idx in range(1, self.num_part_classes):
                 partname = PART_ID2NAME[class_idx]
                 self.log(
                     f"{split}/AP@50_{partname}",
-                    np.mean(aps[class_idx - 1]) * 100,
-                    batch_size=batch_size,
+                    np.mean(ap50[class_idx - 1]) * 100,
+                    batch_size=data_size,
                     on_epoch=True, prog_bar=False, logger=True, sync_dist=True,
                 )
                 
-            mean_aps.append(np.mean(aps) * 100)
+            
+            mean_ap50.append(np.mean(ap50) * 100)
+            
+            
             self.log(f"{split}/AP@50", 
-                        np.mean(aps) * 100, 
-                    batch_size=batch_size,
-                        on_epoch=True, prog_bar=True, logger=True, sync_dist=True
-                )
-            
-            
-            
-            
+                    np.mean(ap50) * 100, 
+                    batch_size=data_size,
+                    on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+            self.log(f"{split}/mAP", 
+                    mAP * 100, 
+                    batch_size=data_size,
+                    on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
             self.log(f"{split}/all_accu", 
                     all_accu * 100.0, 
-                    batch_size=batch_size,
-                    on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+                    batch_size=data_size,
+                    on_epoch=True, prog_bar=False, logger=True, sync_dist=True)
             self.log(f"{split}/pixel_accu", 
                     pixel_accu * 100.0, 
-                    batch_size=batch_size,
-                    on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+                    batch_size=data_size,
+                    on_epoch=True, prog_bar=False, logger=True, sync_dist=True)
             self.log(f"{split}/miou",
                      miou * 100.0,
-                     batch_size=batch_size,
+                     batch_size=data_size,
                     on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
             
-        # need to make sure the order of the splits is correct:
-        # the second validation set is intra set and the third set is inter set
         self.log("monitor_metrics/mean_all_accu", 
                 (all_accus[1]+all_accus[2])/2 * 100.0, 
-                batch_size=batch_size,
-                on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+                batch_size=data_size,
+                on_epoch=True, prog_bar=False, logger=True, sync_dist=True)
         self.log("monitor_metrics/mean_pixel_accu", 
                 (pixel_accus[1]+pixel_accus[2])/2 * 100.0, 
-                batch_size=batch_size,
-                on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+                batch_size=data_size,
+                on_epoch=True, prog_bar=False, logger=True, sync_dist=True)
         self.log("monitor_metrics/mean_imou", 
                 (mious[1]+mious[2])/2 * 100.0, 
-                batch_size=batch_size,
+                batch_size=data_size,
                 on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
         self.log("monitor_metrics/mean_AP@50", 
-                (mean_aps[1]+mean_aps[2])/2 * 100.0, 
-                batch_size=batch_size,
+                (mean_ap50[1]+mean_ap50[2])/2 * 100.0, 
+                batch_size=data_size,
                 on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+        self.log("monitor_metrics/mean_mAP", 
+                (mAPs[1]+mAPs[2])/2 * 100.0, 
+                batch_size=data_size,
+                on_epoch=True, prog_bar=True, logger=True, sync_dist=True
+                )
+
 
 
         self.validation_step_outputs.clear() 
@@ -696,6 +713,7 @@ class GAPartNet(lp.LightningModule):
         pixel_accus = []
         mious = []
         mean_ap50 = []
+        mAPs = []
         for i_, validation_step_outputs in enumerate(self.validation_step_outputs):
             split = splits[i_]
             pc_ids = [i for x in validation_step_outputs for i in x[0]]
@@ -725,9 +743,16 @@ class GAPartNet(lp.LightningModule):
             pixel_accus.append(pixel_accu)
             
             # instance segmentation
-            aps, ap50 = compute_ap(proposals, self.num_part_classes, self.val_ap_iou_threshold)
-            # import pdb
-            # pdb.set_trace()
+            thes = [0.5 + 0.05 * i for i in range(10)]
+            aps = []
+            for the in thes:
+                ap = compute_ap(proposals, self.num_part_classes, the)
+                aps.append(ap)
+                if the == 0.5:
+                    ap50 = ap
+            mAP = np.array(aps).mean()
+            mAPs.append(mAP)
+
             for class_idx in range(1, self.num_part_classes):
                 partname = PART_ID2NAME[class_idx]
                 self.log(
@@ -737,6 +762,7 @@ class GAPartNet(lp.LightningModule):
                     on_epoch=True, prog_bar=False, logger=True, sync_dist=True,
                 )
                 
+            
             mean_ap50.append(np.mean(ap50) * 100)
 
             
@@ -789,10 +815,13 @@ class GAPartNet(lp.LightningModule):
             
             
             self.log(f"{split}/AP@50", 
-                        np.mean(ap50) * 100, 
+                    np.mean(ap50) * 100, 
                     batch_size=data_size,
-                        on_epoch=True, prog_bar=True, logger=True, sync_dist=True
-                )
+                    on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+            self.log(f"{split}/mAP", 
+                    mAP * 100, 
+                    batch_size=data_size,
+                    on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
             self.log(f"{split}/all_accu", 
                     all_accu * 100.0, 
                     batch_size=data_size,
@@ -824,6 +853,11 @@ class GAPartNet(lp.LightningModule):
                 (mean_ap50[1]+mean_ap50[2])/2 * 100.0, 
                 batch_size=data_size,
                 on_epoch=True, prog_bar=True, logger=True, sync_dist=True)
+        self.log("monitor_metrics/mean_mAP", 
+                (mAPs[1]+mAPs[2])/2 * 100.0, 
+                batch_size=data_size,
+                on_epoch=True, prog_bar=True, logger=True, sync_dist=True
+                )
 
 
         self.validation_step_outputs.clear() 

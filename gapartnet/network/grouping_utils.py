@@ -445,21 +445,10 @@ def compute_ap(
         for p in proposals
     ]
 
-    thes = [0.5 + 0.05*i for i in range(10)]
-    ap = []
-    for the in thes:
-        ap.append(_compute_ap(
-        confidence,
-        classes,
-        sorted_indices,
-        batch_indices,
-        sample_indices,
-        proposal_indices,
-        matched,
-        [p.instance_sem_labels.to(device=device) for p in proposals],
-        [p.ious.to(device=device) for p in proposals],
-        num_classes,
-        the, ))
+    ap = _compute_ap(confidence,classes,sorted_indices,batch_indices,
+                         sample_indices,proposal_indices,matched,
+                         [p.instance_sem_labels.to(device=device) for p in proposals],
+                         [p.ious.to(device=device) for p in proposals],
+                         num_classes, iou_threshold,)
 
-    
-    return ap, ap[0]
+    return ap
