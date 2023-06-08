@@ -470,12 +470,34 @@ class GAPartNetInst(LightningDataModule):
         ]
 
     def test_dataloader(self):
-        return DataLoader(
-            self.test_data_files,
-            batch_size=self.test_batch_size,
+        return [
+            DataLoader(
+            self.val_data_files,
+            batch_size=self.val_batch_size,
             shuffle=False,
             num_workers=self.num_workers,
             collate_fn=data_utils.trivial_batch_collator,
             pin_memory=True,
             drop_last=False,
-        )
+        ),
+            
+            DataLoader(
+            self.intra_data_files,
+            batch_size=self.val_batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+            collate_fn=data_utils.trivial_batch_collator,
+            pin_memory=True,
+            drop_last=False,
+        ),
+            
+            DataLoader(
+            self.inter_data_files,
+            batch_size=self.val_batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+            collate_fn=data_utils.trivial_batch_collator,
+            pin_memory=True,
+            drop_last=False,
+        ),
+        ]

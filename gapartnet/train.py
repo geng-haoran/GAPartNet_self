@@ -31,18 +31,31 @@ def log_name(config):
         "-"+str(config["data"]["init_args"]["color_jitter"]) +\
         "-"+str(config["data"]["init_args"]["flip_prob"]) +\
         "-"+str(config["data"]["init_args"]["rotate_prob"])
-    return model_str, data_str
+    
+    # time
+    from datetime import datetime
+    now = datetime.now()
+    time_str = now.strftime("%m-%d-%H-%M")
+    return model_str, data_str, time_str
 
 class CustomCLI(LightningCLI):
     def before_fit(self):
         # Use the parsed arguments to create a name
         if self.config["fit"]["model"]["init_args"]["debug"] == False:
-            wandb.finish()
-            self.config["fit"]["trainer"]["logger"]["init_args"]["mode"] = "online"
-        model_str, data_str = log_name(self.config["fit"])
-        self.config["fit"]["trainer"]["logger"]["init_args"]["name"] += "_" + model_str + "_" + data_str
-        self.trainer.logger = WandbLogger(**self.config["fit"]["trainer"]["logger"]["init_args"])
-
+            model_str, data_str, time_str = log_name(self.config["fit"])
+            self.trainer.logger = WandbLogger(
+                save_dir = "wandb",
+                project = "perception",
+                entity = "haoran-geng",
+                group = "1024_new",
+                name = model_str + "_" + data_str + "_" + time_str,
+                notes = "GAPartNet",
+                tags = ["GAPartNet", "score", "npcs"],
+                save_code = True,
+                mode = "online",
+            )
+        else:
+            print("Debugging, not logging any data")
 
 def main():
     _ = CustomCLI(
