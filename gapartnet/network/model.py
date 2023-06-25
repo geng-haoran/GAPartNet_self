@@ -6,6 +6,7 @@ import torch.nn as nn
 import numpy as np
 import spconv.pytorch as spconv
 import torch.nn.functional as F
+from einops import rearrange, repeat
 
 from epic_ops.reduce import segmented_maxpool
 from epic_ops.iou import batch_instance_seg_iou
@@ -18,7 +19,7 @@ from structure.point_cloud import PointCloudBatch, PointCloud
 from structure.segmentation import Segmentation
 from structure.instances import Instances
 
-from misc.info import OBJECT_NAME2ID, PART_ID2NAME, PART_NAME2ID
+from misc.info import OBJECT_NAME2ID, PART_ID2NAME, PART_NAME2ID, get_symmetry_matrix
 from misc.visu import visualize_gapartnet
 
 class GAPartNet(lp.LightningModule):
@@ -35,6 +36,8 @@ class GAPartNet(lp.LightningModule):
         use_sem_dice_loss: bool = True,
         # instance segmentation
         instance_seg_cfg: Dict = {},
+        # npcs segmentation
+        symmetry_indices: List = [],
         # training
         training_schedule: List = [],
         # validation
@@ -67,7 +70,8 @@ class GAPartNet(lp.LightningModule):
         self.val_ap_iou_threshold = val_ap_iou_threshold
         self.val_score_threshold = val_score_threshold
         self.val_min_num_points_per_proposal = val_min_num_points_per_proposal
-        
+        self.symmetry_indices = torch.as_tensor(symmetry_indices, dtype=torch.int64).to(self.device)
+
         self.ball_query_radius = instance_seg_cfg["ball_query_radius"]
         self.max_num_points_per_query = instance_seg_cfg["max_num_points_per_query"]
         self.min_num_points_per_proposal = instance_seg_cfg["min_num_points_per_proposal"]
@@ -90,16 +94,35 @@ class GAPartNet(lp.LightningModule):
         self.sem_seg_head = nn.Linear(channels[0], self.num_part_classes)
         # offset prediction
         self.offset_head = nn.Sequential(
-            nn.Linear(channels[0], 2*channels[0]),
-            norm_fn(2*channels[0]),
+            nn.Linear(channels[0], channels[0]),
+            norm_fn(channels[0]),
             nn.ReLU(inplace=True),
-            nn.Linear(2*channels[0], 3),
+            nn.Linear(channels[0], 3),
         )
         
         self.score_unet = SparseUNet.build(
             channels[0], channels[:2], block_repeat, norm_fn, without_stem=True
         )
         self.score_head = nn.Linear(channels[0], self.num_part_classes - 1)
+        
+        
+        self.npcs_unet = SparseUNet.build(
+            channels[0], channels[:2], block_repeat, norm_fn, without_stem=True
+        )
+        self.npcs_head = nn.Linear(channels[0], 3 * (self.num_part_classes - 1))
+        
+        # symmetry
+        # self.register_buffer(
+        #     "symmetry_indices", torch.as_tensor(symmetry_indices, dtype=torch.int64)
+        # )
+        # if symmetry_indices is not None:
+        #     assert len(symmetry_indices) == self.num_part_classes, (symmetry_indices, self.num_part_classes)
+        (
+            symmetry_matrix_1, symmetry_matrix_2, symmetry_matrix_3
+        ) = get_symmetry_matrix()
+        self.symmetry_matrix_1 = symmetry_matrix_1
+        self.symmetry_matrix_2 = symmetry_matrix_2
+        self.symmetry_matrix_3 = symmetry_matrix_3
 
         
         if ckpt != "":
@@ -355,6 +378,84 @@ class GAPartNet(lp.LightningModule):
 
         return F.binary_cross_entropy_with_logits(score_logits, gt_scores)
 
+    def forward_proposal_npcs(
+        self,
+        voxel_tensor: spconv.SparseConvTensor,
+        pc_voxel_id: torch.Tensor,
+    ) -> torch.Tensor:
+        npcs_features = self.npcs_unet(voxel_tensor)
+        npcs_logits = self.npcs_head(npcs_features.features)
+        npcs_logits = npcs_logits[pc_voxel_id]
+
+        return npcs_logits
+
+    def loss_proposal_npcs(
+        self,
+        npcs_logits: torch.Tensor,
+        gt_npcs: torch.Tensor,
+        proposals: Instances,
+    ) -> torch.Tensor:
+        sem_preds, sem_labels = proposals.sem_preds, proposals.sem_labels
+        proposal_indices = proposals.proposal_indices
+        valid_mask = (sem_preds == sem_labels) & (gt_npcs != 0).any(dim=-1)
+
+        npcs_logits = npcs_logits[valid_mask]
+        gt_npcs = gt_npcs[valid_mask]
+        sem_preds = sem_preds[valid_mask].long()
+        sem_labels = sem_labels[valid_mask]
+        proposal_indices = proposal_indices[valid_mask]
+
+        npcs_logits = rearrange(npcs_logits, "n (k c) -> n k c", c=3)
+        npcs_logits = npcs_logits.gather(
+            1, index=repeat(sem_preds - 1, "n -> n one c", one=1, c=3)
+        ).squeeze(1)
+
+        proposals.npcs_preds = npcs_logits.detach()
+        proposals.gt_npcs = gt_npcs
+        proposals.npcs_valid_mask = valid_mask
+
+        loss_npcs = 0
+
+        # import pdb; pdb.set_trace()
+        self.symmetry_indices = self.symmetry_indices.to(sem_preds.device)
+        self.symmetry_matrix_1 = self.symmetry_matrix_1.to(sem_preds.device)
+        self.symmetry_matrix_2 = self.symmetry_matrix_2.to(sem_preds.device)
+        self.symmetry_matrix_3 = self.symmetry_matrix_3.to(sem_preds.device)
+        # import pdb; pdb.set_trace()
+        symmetry_indices = self.symmetry_indices[sem_preds]
+        # group #1
+        group_1_mask = symmetry_indices < 3
+        symmetry_indices_1 = symmetry_indices[group_1_mask]
+        if symmetry_indices_1.shape[0] > 0:
+            loss_npcs += compute_npcs_loss(
+                npcs_logits[group_1_mask], gt_npcs[group_1_mask],
+                proposal_indices[group_1_mask],
+                self.symmetry_matrix_1[symmetry_indices_1]
+            )
+
+        # group #2
+        group_2_mask = symmetry_indices == 3
+        symmetry_indices_2 = symmetry_indices[group_2_mask]
+        if symmetry_indices_2.shape[0] > 0:
+            loss_npcs += compute_npcs_loss(
+                npcs_logits[group_2_mask], gt_npcs[group_2_mask],
+                proposal_indices[group_2_mask],
+                self.symmetry_matrix_2[symmetry_indices_2 - 3]
+            )
+
+        # group #3
+        group_3_mask = symmetry_indices == 4
+        symmetry_indices_3 = symmetry_indices[group_3_mask]
+        if symmetry_indices_3.shape[0] > 0:
+            loss_npcs += compute_npcs_loss(
+                npcs_logits[group_3_mask], gt_npcs[group_3_mask],
+                proposal_indices[group_3_mask],
+                self.symmetry_matrix_3[symmetry_indices_3 - 4]
+            )
+
+        return loss_npcs
+
+
 
     def _training_or_validation_step(
         self,
@@ -374,6 +475,7 @@ class GAPartNet(lp.LightningModule):
         batch_indices = data_batch.batch_indices
         instance_sem_labels = data_batch.instance_sem_labels
         num_points_per_instance = data_batch.num_points_per_instance
+        gt_npcs = data_batch.gt_npcs
         
         
         pt_xyz = points[:, :3]
@@ -433,7 +535,8 @@ class GAPartNet(lp.LightningModule):
                 ]
             if proposals is not None:
                 proposals.instance_sem_labels = instance_sem_labels
-                
+        else:
+            proposals = None
                 
         # clustering and scoring
         if self.current_epoch >= self.start_scorenet and voxel_tensor is not None and proposals is not None: # type: ignore
@@ -457,10 +560,34 @@ class GAPartNet(lp.LightningModule):
             else:
                 import pdb; pdb.set_trace()
                 loss_prop_score = 0.0
-
-
+        else:
+            loss_prop_score = 0.0
+            
+        if self.current_epoch >= self.start_npcs and voxel_tensor is not None:
+            npcs_logits = self.forward_proposal_npcs(
+                voxel_tensor, pc_voxel_id
+            )
+            
+            # import pdb; pdb.set_trace()
+            if gt_npcs is not None:
+                gt_npcs = gt_npcs[proposals.valid_mask][proposals.sorted_indices]
+                loss_prop_npcs = self.loss_proposal_npcs(npcs_logits, gt_npcs, proposals)
+            else:
+                loss_prop_npcs = 0.0
+                
+                
+            npcs_preds = npcs_logits.detach()
+            npcs_preds = rearrange(npcs_preds, "n (k c) -> n k c", c=3)
+            npcs_preds = npcs_preds.gather(1, index=repeat(proposals.sem_preds.long() - 1, "n -> n one c", one=1, c=3)).squeeze(1)
+                # proposals.npcs_preds = npcs_preds
+                
+        else:
+            npcs_preds = None
+            
+            loss_prop_npcs = 0.0
+        
         # total loss
-        loss = loss_sem_seg + loss_offset_dist + loss_offset_dir + loss_prop_score
+        loss = loss_sem_seg + loss_offset_dist + loss_offset_dir + loss_prop_score + loss_prop_npcs
 
 
         prefix = running_mode
@@ -494,6 +621,12 @@ class GAPartNet(lp.LightningModule):
             batch_size=batch_size,
             on_epoch=True, prog_bar=False, logger=True, sync_dist=True
         )
+        self.log(
+            f"{prefix}_loss/loss_prop_npcs",
+            loss_prop_npcs,
+            batch_size=batch_size,
+            on_epoch=True, prog_bar=False, logger=True, sync_dist=True
+        )
         
         # evaulation metrics
         self.log(
@@ -509,17 +642,17 @@ class GAPartNet(lp.LightningModule):
             on_epoch=True, prog_bar=False, logger=True, sync_dist=True
         )
 
-        return pc_ids, sem_seg, proposals, loss
+        return pc_ids, sem_seg, npcs_preds, proposals, loss
 
     def training_step(self, point_clouds: List[PointCloud], batch_idx: int):
-        _, _, proposals, loss = self._training_or_validation_step(
+        _, _, _, proposals, loss = self._training_or_validation_step(
             point_clouds, batch_idx, "train"
         )
         return loss
 
     def validation_step(self, point_clouds: List[PointCloud], batch_idx: int, dataloader_idx: int = 0):
         split = ["val", "test_intra", "test_inter"]
-        pc_ids, sem_seg, proposals, _ = self._training_or_validation_step(
+        pc_ids, sem_seg, npcs_preds, proposals, _ = self._training_or_validation_step(
             point_clouds, batch_idx, split[dataloader_idx]
         )
         
@@ -547,8 +680,8 @@ class GAPartNet(lp.LightningModule):
         
         
         
-        self.validation_step_outputs[dataloader_idx].append((pc_ids, sem_seg, proposals_))
-        return pc_ids, sem_seg, proposals_
+        self.validation_step_outputs[dataloader_idx].append((pc_ids, sem_seg, npcs_preds, proposals_))
+        return pc_ids, sem_seg, npcs_preds, proposals_
 
     def on_validation_epoch_end(self):
         
@@ -578,7 +711,7 @@ class GAPartNet(lp.LightningModule):
             miou = mean_iou(sem_preds, sem_labels, num_classes=self.num_part_classes)
             
             # instance segmentation
-            proposals = [x[2] for x in validation_step_outputs if x[2]!= None]
+            proposals = [x[3] for x in validation_step_outputs if x[3]!= None]
             
             del validation_step_outputs
             
@@ -608,7 +741,7 @@ class GAPartNet(lp.LightningModule):
                 )
                 
             
-            mean_ap50.append(np.mean(ap50) * 100)
+            mean_ap50.append(np.mean(ap50))
             
             
             self.log(f"{split}/AP@50", 
@@ -660,7 +793,7 @@ class GAPartNet(lp.LightningModule):
 
     def test_step(self, point_clouds: List[PointCloud], batch_idx: int, dataloader_idx: int = 0):
         split = ["val", "intra", "inter"]
-        pc_ids, sem_seg, proposals, _ = self._training_or_validation_step(
+        pc_ids, sem_seg, npcs_preds, proposals, _ = self._training_or_validation_step(
             point_clouds, batch_idx, split[dataloader_idx]
         )
         
@@ -703,8 +836,8 @@ class GAPartNet(lp.LightningModule):
             sorted_indices = proposals.sorted_indices,
         )
         
-        self.validation_step_outputs[dataloader_idx].append((pc_ids, sem_seg, proposals_))
-        return pc_ids, sem_seg, proposals_
+        self.validation_step_outputs[dataloader_idx].append((pc_ids, sem_seg, npcs_preds, proposals_))
+        return pc_ids, sem_seg, npcs_preds, proposals_
 
     def on_test_epoch_end(self):
         
@@ -733,8 +866,13 @@ class GAPartNet(lp.LightningModule):
             miou = mean_iou(sem_preds, sem_labels, num_classes=self.num_part_classes)
             
             # instance segmentation
-            proposals = [x[2] for x in validation_step_outputs if x[2]!= None]
+            proposals = [x[3] for x in validation_step_outputs if x[3]!= None]
             
+            # pose estimation
+            npcs_preds = torch.cat(
+                [x[2] for x in validation_step_outputs], dim=0
+            )
+            # import  pdb; pdb.set_trace()
             del validation_step_outputs
             
             # semantic segmentation
@@ -763,7 +901,7 @@ class GAPartNet(lp.LightningModule):
                 )
                 
             
-            mean_ap50.append(np.mean(ap50) * 100)
+            mean_ap50.append(np.mean(ap50))
 
             
             if self.visualize_cfg["visualize"] == True:
@@ -786,7 +924,6 @@ class GAPartNet(lp.LightningModule):
                         proposal_offsets = proposals_.proposal_offsets
                         num_points_per_proposal = proposals_.num_points_per_proposal
                         num_proposals = num_points_per_proposal.shape[0]
-                        npcs_preds = proposals_.npcs_preds
                         score_preds= proposals_.score_preds
                         mask = proposals_.valid_mask
 
@@ -810,6 +947,8 @@ class GAPartNet(lp.LightningModule):
                         split = split,
                         sem_preds=sample_sem_pred.cpu().numpy(), # type: ignore
                         ins_preds=sample_ins_seg_pred.cpu().numpy(),
+                        npcs_preds=npcs_preds.cpu().numpy(),
+                        
                     )
             
             

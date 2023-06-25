@@ -15,7 +15,7 @@ python train.py test -c gapartnet.yaml \
 --model.init_args.debug True
 
 
-CUDA_VISIBLE_DEVICES=5 \
+CUDA_VISIBLE_DEVICES=7 \
 python train.py fit -c gapartnet.yaml \
---model.init_args.ckpt /data/haoran/SAM-GAPart/GAPartNet_self/gapartnet/wandb/perception/f7jojtoy/checkpoints/epoch_116_accu_0.00.ckpt \
+--model.init_args.ckpt ckpt/epoch_133-758-371.ckpt \
 --model.init_args.debug True

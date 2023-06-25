@@ -41,8 +41,8 @@ def visualize_gapartnet(
     split: str = "",
     bboxes: np.ndarray = None, # type: ignore
     sem_preds: np.ndarray = None, # type: ignore
-    npcs_maps: np.ndarray = None, # type: ignore
     ins_preds: np.ndarray = None, # type: ignore
+    npcs_preds: np.ndarray = None, # type: ignore
     have_proposal = True, 
     save_detail = False,
 ):
@@ -116,7 +116,7 @@ def visualize_gapartnet(
             (Y_START + int(0.5*(WIDTH - 3 * EDGE)), X_START + HEIGHT + int(0.5*EDGE)), 
             font, fontScale, fontColor, thickness, lineType)
     if "npcs_pred" in save_option:
-        npcs_pred_img = map2image(xyz, npcs_maps*255.0)
+        npcs_pred_img = map2image(xyz, npcs_preds*255.0)
         npcs_pred_img = cv2.cvtColor(npcs_pred_img, cv2.COLOR_BGR2RGB)
         if save_detail:
             cv2.imwrite(f"{save_root}/npcs_pred.png", npcs_pred_img)

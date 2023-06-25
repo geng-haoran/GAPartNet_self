@@ -22,6 +22,7 @@ model:
     training_schedule: [0,0]
     val_nms_iou_threshold: 0.3
     val_ap_iou_threshold: 0.5
+    symmetry_indices: [0, 1, 3, 3, 2, 0, 3, 2, 4, 1]
     visualize_cfg:
       visualize: True
       visualize_dir: visu
@@ -29,7 +30,7 @@ model:
       RAW_IMG_ROOT: "data/image_kuafu"
       GAPARTNET_DATA_ROOT: "data/GAPartNet_All"
       SAVE_ROOT: "output/GAPartNet_result"
-      save_option: ["raw", "pc", "sem_pred", "sem_gt", "ins_pred", "ins_gt"]
+      save_option: ["raw", "pc", "sem_pred", "sem_gt", "ins_pred", "ins_gt", "npcs_pred", "npcs_gt"]
 
 
 data:
@@ -38,7 +39,7 @@ data:
     root_dir: data/GAPartNet_All
     max_points: 20000
     voxel_size: [0.01,0.01,0.01]
-    train_batch_size: 32
+    train_batch_size: 64
     val_batch_size: 32
     test_batch_size: 32
     num_workers: 16
@@ -46,10 +47,10 @@ data:
     color_jitter: 0.3
     flip_prob: 0.3
     rotate_prob: 0.3
-    train_few_shot: false
-    val_few_shot: false
-    intra_few_shot: false
-    inter_few_shot: false
+    train_few_shot: true
+    val_few_shot: true
+    intra_few_shot: true
+    inter_few_shot: true
     few_shot_num: 640
 
 trainer:

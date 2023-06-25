@@ -30,6 +30,9 @@ class PointCloudBatch:
     num_points_per_instance: Optional[torch.Tensor] = None
     instance_sem_labels: Optional[torch.Tensor] = None
     
+    #npcs
+    gt_npcs: Optional[Union[torch.Tensor, np.ndarray]] = None
+    
 @dataclass
 class PointCloud:
     pc_id: str
@@ -103,10 +106,10 @@ class PointCloud:
         else:
             instance_labels = None
 
-        # if point_clouds[0].gt_npcs is not None:
-        #     gt_npcs = torch.cat([pc.gt_npcs for pc in point_clouds], dim=0)
-        # else:
-        #     gt_npcs = None
+        if point_clouds[0].gt_npcs is not None:
+            gt_npcs = torch.cat([pc.gt_npcs for pc in point_clouds], dim=0)
+        else:
+            gt_npcs = None
 
         if point_clouds[0].num_instances is not None:
             num_instances = [pc.num_instances for pc in point_clouds]
@@ -180,7 +183,9 @@ class PointCloud:
             instance_regions=instance_regions,
             num_points_per_instance=num_points_per_instance, 
             instance_sem_labels=instance_sem_labels, 
-            instance_labels = instance_labels
+            instance_labels = instance_labels,
+            #npcs
+            gt_npcs=gt_npcs,
         )
     
 
