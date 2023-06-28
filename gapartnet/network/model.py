@@ -21,6 +21,7 @@ from structure.instances import Instances
 
 from misc.info import OBJECT_NAME2ID, PART_ID2NAME, PART_NAME2ID, get_symmetry_matrix
 from misc.visu import visualize_gapartnet
+from misc.pose_fitting import estimate_pose_from_npcs
 
 class GAPartNet(lp.LightningModule):
     def __init__(
@@ -567,20 +568,28 @@ class GAPartNet(lp.LightningModule):
             npcs_logits = self.forward_proposal_npcs(
                 voxel_tensor, pc_voxel_id
             )
-            
-            # import pdb; pdb.set_trace()
             if gt_npcs is not None:
                 gt_npcs = gt_npcs[proposals.valid_mask][proposals.sorted_indices]
                 loss_prop_npcs = self.loss_proposal_npcs(npcs_logits, gt_npcs, proposals)
-            else:
-                loss_prop_npcs = 0.0
                 
+                # valid_mask = (sem_preds == sem_labels) & (gt_npcs != 0).any(dim=-1)
+                # proposals.npcs_valid_mask = valid_mask
+            
+
+            # npcs_logits = rearrange(npcs_logits, "n (k c) -> n k c", c=3)
+            # npcs_preds = npcs_logits.gather(
+            #     1, index=repeat(sem_preds - 1, "n -> n one c", one=1, c=3)
+            # ).squeeze(1)
+
+            # import pdb; pdb.set_trace()
+            # npcs_logits = npcs_logits.detach()
+            # npcs_logits = rearrange(npcs_logits, "n (k c) -> n k c", c=3)
+            # npcs_logits = npcs_logits.gather(1, index=repeat(proposals.sem_preds.long() - 1, "n -> n one c", one=1, c=3)).squeeze(1)
+            # proposals.npcs_preds = npcs_logits
+            # npcs_map = torch.zeros_like(pt_xyz, device=pt_xyz.device)
+            # npcs_map[instance_mask]
                 
-            npcs_preds = npcs_logits.detach()
-            npcs_preds = rearrange(npcs_preds, "n (k c) -> n k c", c=3)
-            npcs_preds = npcs_preds.gather(1, index=repeat(proposals.sem_preds.long() - 1, "n -> n one c", one=1, c=3)).squeeze(1)
-                # proposals.npcs_preds = npcs_preds
-                
+            
         else:
             npcs_preds = None
             
@@ -642,7 +651,7 @@ class GAPartNet(lp.LightningModule):
             on_epoch=True, prog_bar=False, logger=True, sync_dist=True
         )
 
-        return pc_ids, sem_seg, npcs_preds, proposals, loss
+        return pc_ids, sem_seg, proposals, loss
 
     def training_step(self, point_clouds: List[PointCloud], batch_idx: int):
         _, _, _, proposals, loss = self._training_or_validation_step(
@@ -652,7 +661,7 @@ class GAPartNet(lp.LightningModule):
 
     def validation_step(self, point_clouds: List[PointCloud], batch_idx: int, dataloader_idx: int = 0):
         split = ["val", "test_intra", "test_inter"]
-        pc_ids, sem_seg, npcs_preds, proposals, _ = self._training_or_validation_step(
+        pc_ids, sem_seg, proposals, _ = self._training_or_validation_step(
             point_clouds, batch_idx, split[dataloader_idx]
         )
         
@@ -680,8 +689,8 @@ class GAPartNet(lp.LightningModule):
         
         
         
-        self.validation_step_outputs[dataloader_idx].append((pc_ids, sem_seg, npcs_preds, proposals_))
-        return pc_ids, sem_seg, npcs_preds, proposals_
+        self.validation_step_outputs[dataloader_idx].append((pc_ids, sem_seg, proposals_))
+        return pc_ids, sem_seg, proposals_
 
     def on_validation_epoch_end(self):
         
@@ -711,7 +720,7 @@ class GAPartNet(lp.LightningModule):
             miou = mean_iou(sem_preds, sem_labels, num_classes=self.num_part_classes)
             
             # instance segmentation
-            proposals = [x[3] for x in validation_step_outputs if x[3]!= None]
+            proposals = [x[2] for x in validation_step_outputs if x[2]!= None]
             
             del validation_step_outputs
             
@@ -793,7 +802,7 @@ class GAPartNet(lp.LightningModule):
 
     def test_step(self, point_clouds: List[PointCloud], batch_idx: int, dataloader_idx: int = 0):
         split = ["val", "intra", "inter"]
-        pc_ids, sem_seg, npcs_preds, proposals, _ = self._training_or_validation_step(
+        pc_ids, sem_seg, proposals, _ = self._training_or_validation_step(
             point_clouds, batch_idx, split[dataloader_idx]
         )
         
@@ -823,6 +832,7 @@ class GAPartNet(lp.LightningModule):
         
         
         proposals_ = Instances(
+            pt_xyz = proposals.pt_xyz,
             score_preds=proposals.score_preds, 
             pt_sem_classes=proposals.pt_sem_classes,
             batch_indices=proposals.batch_indices, 
@@ -834,10 +844,13 @@ class GAPartNet(lp.LightningModule):
             num_points_per_proposal=proposals.num_points_per_proposal,
             num_points_per_instance=proposals.num_points_per_instance,
             sorted_indices = proposals.sorted_indices,
+            npcs_preds=proposals.npcs_preds,
+            npcs_valid_mask=proposals.npcs_valid_mask,
+            
         )
         
-        self.validation_step_outputs[dataloader_idx].append((pc_ids, sem_seg, npcs_preds, proposals_))
-        return pc_ids, sem_seg, npcs_preds, proposals_
+        self.validation_step_outputs[dataloader_idx].append((pc_ids, sem_seg, proposals_))
+        return pc_ids, sem_seg, proposals_
 
     def on_test_epoch_end(self):
         
@@ -866,12 +879,18 @@ class GAPartNet(lp.LightningModule):
             miou = mean_iou(sem_preds, sem_labels, num_classes=self.num_part_classes)
             
             # instance segmentation
-            proposals = [x[3] for x in validation_step_outputs if x[3]!= None]
+            proposals = [x[2] for x in validation_step_outputs if x[2]!= None]
             
             # pose estimation
-            npcs_preds = torch.cat(
-                [x[2] for x in validation_step_outputs], dim=0
-            )
+            # npcs_preds = torch.cat(
+            #     [x[2] for x in validation_step_outputs], dim=0
+            # )
+            
+            # npcs_maps = pcs[0].points[:,:3].clone()
+            # npcs_maps[:] = 230./255.
+            # if proposals is not None:
+            #     npcs_maps[proposal_indices] = npcs_preds
+            # import pdb; pdb.set_trace()
             # import  pdb; pdb.set_trace()
             del validation_step_outputs
             
@@ -916,6 +935,7 @@ class GAPartNet(lp.LightningModule):
                     batch_id = sample_id // batch_size
                     batch_sample_id = sample_id % batch_size
                     proposals_ = proposals[batch_id]
+                    
                     mask = proposals_.valid_mask.reshape(-1,20000)[batch_sample_id]
                     
                     if proposals_ is not None:
@@ -933,10 +953,33 @@ class GAPartNet(lp.LightningModule):
                         ins_seg_preds =  torch.ones(mask.shape[0]) * 0
                         for ins_i in range(len(proposal_offsets) - 1):
                             ins_seg_preds[proposal_indices[proposal_offsets[ins_i]:proposal_offsets[ins_i + 1]]] = ins_i+1
-                    
+
+                        npcs_maps = torch.ones(proposals_.valid_mask.shape[0],3, device = proposals_.valid_mask.device)*0.0
+                        valid_index = torch.where(proposals_.valid_mask==True)[0][proposals_.sorted_indices.long()[torch.where(proposals_.npcs_valid_mask==True)]]
+                        npcs_maps[valid_index] = proposals_.npcs_preds
+                        
+                        # bounding box
+                        bboxes = []
+                        bboxes_batch_index = []
+                        for proposal_i in range(len(proposal_offsets) - 1):
+                            npcs_i = npcs_maps[proposal_indices[proposal_offsets[proposal_i]:proposal_offsets[proposal_i + 1]]]
+                            npcs_i = npcs_i - 0.5
+                            xyz_i = pt_xyz[proposal_offsets[proposal_i]:proposal_offsets[proposal_i + 1]]
+                            # import pdb; pdb.set_trace() 
+                            if xyz_i.shape[0] < 10:
+                                continue
+                            bbox_xyz, scale, rotation, translation, out_transform, best_inlier_idx = estimate_pose_from_npcs(xyz_i.cpu().numpy(), npcs_i.cpu().numpy())
+                            # import pdb; pdb.set_trace()
+                            if scale[0] == None:
+                                continue
+                            bboxes_batch_index.append(batch_indices[proposal_offsets[proposal_i]])
+                            bboxes.append(bbox_xyz.tolist())
+                        
+                    # get the sampled data point
                     sample_sem_pred = sem_preds.reshape(-1,20000)[sample_id]    
                     sample_ins_seg_pred = ins_seg_preds.reshape(-1,20000)[batch_sample_id]
-                    # import pdb; pdb.set_trace()
+                    sample_npcs_map = npcs_maps.reshape(-1,20000, 3)[batch_sample_id]
+                    sample_bboxes = [bboxes[i] for i in range(len(bboxes)) if bboxes_batch_index[i] == batch_sample_id]
                     
                     visualize_gapartnet(
                         SAVE_ROOT=self.visualize_cfg["SAVE_ROOT"],
@@ -947,8 +990,8 @@ class GAPartNet(lp.LightningModule):
                         split = split,
                         sem_preds=sample_sem_pred.cpu().numpy(), # type: ignore
                         ins_preds=sample_ins_seg_pred.cpu().numpy(),
-                        npcs_preds=npcs_preds.cpu().numpy(),
-                        
+                        npcs_preds=sample_npcs_map.cpu().numpy(),
+                        bboxes = sample_bboxes,
                     )
             
             
@@ -1000,6 +1043,7 @@ class GAPartNet(lp.LightningModule):
 
 
         self.validation_step_outputs.clear() 
+    
     def configure_optimizers(self):
         return torch.optim.Adam(
             filter(lambda p: p.requires_grad, self.parameters()),

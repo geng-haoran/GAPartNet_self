@@ -131,7 +131,7 @@ def visualize_gapartnet(
             font, fontScale, fontColor, thickness, lineType)
     if "bbox_pred" in save_option:
         img_bbox_pred = pc_img.copy()
-        draw_bbox(img_bbox_pred, bboxes[0], trans)
+        draw_bbox(img_bbox_pred, bboxes, trans)
         if save_detail:
             cv2.imwrite(f"{save_root}/bbox_pred.png", img_bbox_pred)
         X_START = EDGE + (WIDTH + EDGE) * 2
@@ -141,9 +141,9 @@ def visualize_gapartnet(
         cv2.putText(final_img, text, 
             (Y_START + int(0.5*(WIDTH - 3 * EDGE)), X_START + HEIGHT + int(0.5*EDGE)), 
             font, fontScale, fontColor, thickness, lineType)
-    if "pure_bbox" in save_option:
+    if "bbox_pred_pure" in save_option:
         img_empty = np.ones((HEIGHT, WIDTH, 3), dtype=np.uint8) * 255
-        draw_bbox(img_empty, bboxes[0], trans)
+        draw_bbox(img_empty, bboxes, trans)
         if save_detail:
             cv2.imwrite(f"{save_root}/bbox_pure.png", img_empty)
         X_START = EDGE + (WIDTH + EDGE) * 2
@@ -197,8 +197,8 @@ def visualize_gapartnet(
             font, fontScale, fontColor, thickness, lineType)
     if "bbox_gt" in save_option:
         bboxes_gt = [[]]
-        ins_gt = gts[1]
-        npcs_gt = gts[2]
+        ins_gt = instance_label
+        npcs_gt = npcs_map
         # import pdb
         # pdb.set_trace()
         num_ins = ins_gt.max()+1
@@ -228,8 +228,8 @@ def visualize_gapartnet(
             font, fontScale, fontColor, thickness, lineType)
     if "bbox_gt_pure" in save_option:
         bboxes_gt = [[]]
-        ins_gt = gts[1]
-        npcs_gt = gts[2]
+        ins_gt = instance_label
+        npcs_gt = npcs_map
         # import pdb
         # pdb.set_trace()
         num_ins = ins_gt.max()+1

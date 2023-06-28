@@ -30,7 +30,7 @@ model:
       RAW_IMG_ROOT: "data/image_kuafu"
       GAPARTNET_DATA_ROOT: "data/GAPartNet_All"
       SAVE_ROOT: "output/GAPartNet_result"
-      save_option: ["raw", "pc", "sem_pred", "sem_gt", "ins_pred", "ins_gt", "npcs_pred", "npcs_gt"]
+      save_option: ["raw", "pc", "sem_pred", "sem_gt", "ins_pred", "ins_gt", "npcs_pred", "npcs_gt", "bbox_gt", "bbox_gt_pure", "bbox_pred", "bbox_pred_pure"]
 
 
 data:
